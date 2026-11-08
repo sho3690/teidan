@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>鼎談 TEIDAN</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23023e8a'/%3E%3Ccircle cx='10' cy='12' r='3.2' fill='white'/%3E%3Ccircle cx='22' cy='12' r='3.2' fill='white'/%3E%3Ccircle cx='16' cy='22' r='3.2' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-name">鼎談</span>
+      <span class="brand-sub">TEIDAN</span>
+    </div>
+    <p class="brand-desc">Claude・ChatGPT・Gemini が話し合って、ひとつの結論を出します</p>
+    <div class="topbar-actions">
+      <button type="button" class="btn btn-tertiary" id="btn-lock" hidden>鍵をかける</button>
+      <button type="button" class="btn btn-secondary" id="btn-settings" hidden>設定</button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- 合言葉で開く -->
+  <section class="view narrow" id="view-lock" hidden>
+    <h1 class="view-title">合言葉を入れてください</h1>
+    <p class="lead">この端末に保存したAPIキーを開きます。</p>
+    <div class="panel">
+      <div class="field">
+        <label for="lock-pass">合言葉</label>
+        <input type="password" id="lock-pass" autocomplete="current-password">
+        <p class="field-error" id="lock-error" role="alert" hidden></p>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="btn-unlock">開く</button>
+      </div>
+    </div>
+    <p class="note">合言葉を忘れた場合は、<button type="button" class="link-btn" id="btn-forget">この端末の保存内容を消して</button>最初から設定し直してください。</p>
+  </section>
+
+  <!-- 設定 -->
+  <section class="view narrow" id="view-setup" hidden>
+    <h1 class="view-title">APIキーの設定</h1>
+    <p class="lead">使いたいAIのAPIキーを入れてください。2つ以上あれば話し合いができます。</p>
+
+    <div class="panel info">
+      <p><strong>キーの行き先：</strong>キーはこのページから各社のAPIへ直接送られるだけで、GitHubや他の場所には送られません。</p>
+      <p><strong>料金：</strong>APIは月額プランとは別の従量課金です。各社の管理画面で上限額を決めておくと安心です。</p>
+    </div>
+
+    <div class="panel provider" data-p="claude">
+      <h2 class="provider-title"><span class="mark" aria-hidden="true">C</span>Claude</h2>
+      <div class="field">
+        <label for="key-claude">APIキー</label>
+        <input type="password" id="key-claude" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+        <p class="help"><a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">Anthropic Console</a> で発行できます。</p>
+      </div>
+      <div class="field">
+        <label for="model-claude">モデル</label>
+        <div class="row">
+          <select id="model-claude"></select>
+          <button type="button" class="btn btn-secondary btn-fetch" data-p="claude">一覧を更新</button>
+        </div>
+        <p class="help status" id="status-claude" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div class="panel provider" data-p="openai">
+      <h2 class="provider-title"><span class="mark" aria-hidden="true">G</span>ChatGPT</h2>
+      <div class="field">
+        <label for="key-openai">APIキー</label>
+        <input type="password" id="key-openai" autocomplete="off" spellcheck="false" placeholder="sk-…">
+        <p class="help"><a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI Platform</a> で発行できます。</p>
+      </div>
+      <div class="field">
+        <label for="model-openai">モデル</label>
+        <div class="row">
+          <select id="model-openai"></select>
+          <button type="button" class="btn btn-secondary btn-fetch" data-p="openai">一覧を更新</button>
+        </div>
+        <p class="help status" id="status-openai" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div class="panel provider" data-p="gemini">
+      <h2 class="provider-title"><span class="mark" aria-hidden="true">Gm</span>Gemini</h2>
+      <div class="field">
+        <label for="key-gemini">APIキー</label>
+        <input type="password" id="key-gemini" autocomplete="off" spellcheck="false" placeholder="AIza…">
+        <p class="help"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a> で発行できます。</p>
+      </div>
+      <div class="field">
+        <label for="model-gemini">モデル</label>
+        <div class="row">
+          <select id="model-gemini"></select>
+          <button type="button" class="btn btn-secondary btn-fetch" data-p="gemini">一覧を更新</button>
+        </div>
+        <p class="help status" id="status-gemini" aria-live="polite"></p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel-title">この端末への保存</h2>
+      <div class="check">
+        <input type="checkbox" id="save-local" checked>
+        <label for="save-local">この端末に保存する（合言葉で暗号化）</label>
+      </div>
+      <p class="help">保存しない場合、ページを閉じるとキーは消えます。</p>
+      <div class="field" id="pass-fields">
+        <label for="setup-pass">合言葉（8文字以上）</label>
+        <input type="password" id="setup-pass" autocomplete="new-password">
+        <label for="setup-pass2" class="mt">合言葉（もう一度）</label>
+        <input type="password" id="setup-pass2" autocomplete="new-password">
+      </div>
+      <p class="field-error" id="setup-error" role="alert" hidden></p>
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="btn-save">保存して始める</button>
+        <button type="button" class="btn btn-tertiary" id="btn-cancel-setup" hidden>戻る</button>
+      </div>
+    </div>
+
+    <div class="danger-zone" id="danger-zone" hidden>
+      <button type="button" class="btn btn-danger" id="btn-wipe">この端末からキーを消す</button>
+    </div>
+  </section>
+
+  <!-- 話し合い -->
+  <section class="view" id="view-main" hidden>
+    <div class="ask narrow">
+      <div class="field">
+        <label for="question" class="label-lg">話し合ってほしいこと</label>
+        <textarea id="question" rows="4" placeholder="例：在宅勤務とオフィス出社、チームの生産性が上がるのはどちら？"></textarea>
+        <p class="field-error" id="ask-error" role="alert" hidden></p>
+      </div>
+
+      <fieldset class="members">
+        <legend>参加するAI</legend>
+        <div class="member-list" id="member-list"></div>
+      </fieldset>
+
+      <div class="options">
+        <div class="field inline">
+          <label for="rounds">意見交換の回数</label>
+          <select id="rounds">
+            <option value="1">1回（速い）</option>
+            <option value="2" selected>2回（おすすめ）</option>
+            <option value="3">3回（じっくり）</option>
+          </select>
+        </div>
+        <div class="field inline">
+          <label for="moderator">まとめ役</label>
+          <select id="moderator"></select>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="btn btn-primary btn-lg" id="btn-start">話し合いを始める</button>
+        <button type="button" class="btn btn-secondary" id="btn-stop" hidden>止める</button>
+      </div>
+    </div>
+
+    <div id="result" class="result" hidden>
+      <div class="result-head wide">
+        <h2 class="result-q" id="result-q"></h2>
+        <div class="result-tools">
+          <span class="progress" id="progress" aria-live="polite"></span>
+          <button type="button" class="btn btn-secondary" id="btn-export" hidden>テキストで保存</button>
+        </div>
+      </div>
+      <div id="rounds-out" class="wide"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p>APIキーはこの端末の中だけで扱います · v1.0</p>
+</footer>
+</body>
+</html>
