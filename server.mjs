@@ -21,8 +21,6 @@ import { fileURLToPath } from 'node:url';
 const PORT = Number(process.env.TEIDAN_PORT || 8796);
 const HOST = '127.0.0.1';
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const STATE_DIR = path.join(os.homedir(), '.teidan');
-export const GEMINI_HOME = path.join(STATE_DIR, 'gemini-home');
 const CALL_TIMEOUT_MS = 6 * 60 * 1000;
 const MAX_BODY = 400 * 1024;
 const MAX_OUTPUT = 2 * 1024 * 1024;
@@ -99,6 +97,9 @@ function run(exe, args, { input = '', cwd, env, signal }) {
 
 export function explain(name, text) {
   const t = (text || '').toLowerCase();
+  if (/(ineligibletier|no longer supported for gemini code assist|migrate to the antigravity)/.test(t)) {
+    return { kind: 'retired', message: `${name} CLI は、個人のGoogleアカウントでの提供が終了しました（2026年6月18日、Google側の変更）。Gemini は今のところ鼎談に参加できません。` };
+  }
   if (/(not logged in|please log ?in|\/login|unauthori[sz]ed|authenticat|oauth|credential|expired|401|sign in|login required)/.test(t)) {
     return { kind: 'login', message: `${name} にログインできていません。設定画面の手順でログインし直してください。` };
   }
@@ -121,28 +122,83 @@ export const CODEX_DISABLE = [
   'skill_mcp_dependency_install', 'workspace_dependencies',
 ];
 
-export const GEMINI_SETTINGS = {
-  security: { auth: { selectedType: 'oauth-personal' }, folderTrust: { enabled: false } },
-  tools: {
-    core: ['__no_tools__'],
-    exclude: [
-      'read_file', 'read_many_files', 'list_directory', 'glob', 'search_file_content', 'grep_search',
-      'run_shell_command', 'write_file', 'replace', 'edit', 'web_fetch', 'google_web_search',
-      'save_memory', 'write_todos', 'activate_skill', 'codebase_investigator', 'delegate_to_agent',
-    ],
-  },
-  general: { disableAutoUpdate: true, disableUpdateNag: true, checkpointing: { enabled: false } },
-  privacy: { usageStatisticsEnabled: false },
-  telemetry: { enabled: false },
-  experimental: { extensionManagement: false },
-};
+/* ---------------- Gemini（APIキーをキーチェーンに保管） ----------------
+   個人のGoogleアカウントでの Gemini CLI は 2026-06-18 に提供終了。
+   代わりの Antigravity CLI は他アプリへの組み込みが規約で禁止されているため、
+   Google が勧める AI Studio の APIキーで呼ぶ。キーは macOS のキーチェーンに保存し、画面には返さない。 */
 
-export function ensureGeminiHome() {
-  const dir = path.join(GEMINI_HOME, '.gemini');
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const file = path.join(dir, 'settings.json');
-  fs.writeFileSync(file, JSON.stringify(GEMINI_SETTINGS, null, 2), { mode: 0o600 });
-  return file;
+const KC_SERVICE = 'teidan.gemini-api-key';
+const KC_ACCOUNT = 'teidan';
+const SECURITY = '/usr/bin/security';
+const GEMINI_DEFAULT_MODELS = ['gemini-pro-latest', 'gemini-flash-latest'];
+
+async function keychainGet() {
+  const r = await run(SECURITY, ['find-generic-password', '-s', KC_SERVICE, '-a', KC_ACCOUNT, '-w'], { cwd: os.tmpdir(), env: childEnv() });
+  return r.code === 0 ? r.out.trim() : '';
+}
+
+export function validGeminiKey(key) {
+  return typeof key === 'string' && /^[A-Za-z0-9_\-]{20,200}$/.test(key);
+}
+
+async function keychainSet(key) {
+  if (!validGeminiKey(key)) return false;
+  // 引数に載せると ps で見えるので、security の対話モードに標準入力で渡す
+  const r = await run(SECURITY, ['-i'], { input: `add-generic-password -U -s ${KC_SERVICE} -a ${KC_ACCOUNT} -w ${key}\n`, cwd: os.tmpdir(), env: childEnv() });
+  return r.code === 0 && (await keychainGet()) === key;
+}
+
+async function keychainDelete() {
+  await run(SECURITY, ['delete-generic-password', '-s', KC_SERVICE, '-a', KC_ACCOUNT], { cwd: os.tmpdir(), env: childEnv() });
+}
+
+function geminiError(status, message) {
+  const m = (message || '').toLowerCase();
+  if (status === 400 && /api key/.test(m) || status === 401 || status === 403 && /api key|permission/.test(m)) {
+    return { kind: 'login', message: 'Gemini のAPIキーが正しくないか、使えません。設定画面でキーを入れ直してください。' };
+  }
+  if (status === 429 || /quota|resource_exhausted/.test(m)) {
+    return { kind: 'limit', message: 'Gemini の利用上限（無料枠）に達しました。時間をおくと使えるようになります。' };
+  }
+  if (status === 404) return { kind: 'model', message: 'Gemini では、そのモデルは使えません。設定でモデルを空欄（標準）に戻してください。' };
+  if (status >= 500) return { kind: 'other', message: 'Gemini 側が混み合っているか、不調です。少し待ってからもう一度お試しください。' };
+  return explain('Gemini', message);
+}
+
+async function geminiCall({ system, prompt, model }, signal) {
+  const key = await keychainGet();
+  if (!key) return { error: 'Gemini のAPIキーが未設定です。設定画面で入れてください。', kind: 'nokey' };
+  const models = model ? [model] : GEMINI_DEFAULT_MODELS;
+  let last = null;
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i];
+    let res; let body = null;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(CALL_TIMEOUT_MS)].filter(Boolean)),
+      });
+      body = await res.json().catch(() => null);
+    } catch (e) {
+      if (signal?.aborted) return { error: '止めました。', kind: 'aborted' };
+      if (e && e.name === 'TimeoutError') return { error: 'Gemini の返事が6分以上来なかったので、打ち切りました。', kind: 'timeout' };
+      return { error: 'Gemini に接続できませんでした。ネットの接続を確かめてください。', kind: 'network' };
+    }
+    if (res.ok) {
+      const cand = body && body.candidates && body.candidates[0];
+      const text = cand && cand.content ? (cand.content.parts || []).filter((p) => !p.thought && p.text).map((p) => p.text).join('').trim() : '';
+      if (text) return { text, model: m };
+      const why = (body && body.promptFeedback && body.promptFeedback.blockReason) || (cand && cand.finishReason) || '空の応答';
+      return { error: `Gemini から答えが返りませんでした（${why}）。`, kind: 'other' };
+    }
+    last = geminiError(res.status, body && body.error && body.error.message);
+    // 標準モデルで上限・未対応なら、軽いモデルで試し直す
+    if (!model && (last.kind === 'limit' || last.kind === 'model') && i < models.length - 1) continue;
+    return { error: last.message, kind: last.kind };
+  }
+  return { error: last ? last.message : 'Gemini が応答に失敗しました。', kind: last ? last.kind : 'other' };
 }
 
 export const PROVIDERS = {
@@ -191,24 +247,8 @@ export const PROVIDERS = {
 
   gemini: {
     name: 'Gemini',
-    exe: 'gemini',
-    args({ model }) {
-      return ['-p', '上の依頼に答えてください。', '-o', 'json', '-e', 'none', ...(model ? ['-m', model] : [])];
-    },
-    input: ({ prompt }) => prompt,
-    env: ({ dir }) => ({ GEMINI_CLI_HOME: GEMINI_HOME, GEMINI_SYSTEM_MD: path.join(dir, 'system.md') }),
-    async prepare({ dir, system }) {
-      ensureGeminiHome();
-      await fsp.writeFile(path.join(dir, 'system.md'), system);
-    },
-    async parse(r) {
-      let data = null;
-      const start = r.out.indexOf('{');
-      try { data = JSON.parse(start >= 0 ? r.out.slice(start) : r.out); } catch {}
-      if (data && data.response && !data.error) return { text: String(data.response).trim() };
-      const msg = (data && data.error && (data.error.message || JSON.stringify(data.error))) || r.err || r.out;
-      return { fail: msg };
-    },
+    api: true,
+    call: geminiCall,
   },
 };
 
@@ -217,6 +257,11 @@ let running = 0;
 export async function ask(pid, { system, prompt, model }, signal) {
   const p = PROVIDERS[pid];
   if (!p) return { error: '知らないAIです。', kind: 'other' };
+  if (p.api) {
+    if (running >= MAX_PARALLEL) return { error: '同時に動かせる数を超えました。少し待ってください。', kind: 'busy' };
+    running++;
+    try { return await p.call({ system, prompt, model: sanitizeModel(model) }, signal); } finally { running--; }
+  }
   const exe = findExe(p.exe);
   if (!exe) return { error: `${p.name} のコマンド（${p.exe}）がこのMacに見つかりません。`, kind: 'missing' };
   if (running >= MAX_PARALLEL) return { error: '同時に動かせる数を超えました。少し待ってください。', kind: 'busy' };
@@ -248,9 +293,11 @@ function sanitizeModel(m) {
 export async function status() {
   const out = {};
   for (const [pid, p] of Object.entries(PROVIDERS)) {
-    const exe = findExe(p.exe);
-    out[pid] = { name: p.name, installed: !!exe, login: 'unknown' };
+    if (p.api) continue;
+    out[pid] = { name: p.name, installed: !!findExe(p.exe), login: 'unknown' };
   }
+  const hasKey = !!(await keychainGet());
+  out.gemini = { name: 'Gemini', installed: hasKey, login: hasKey ? 'key' : 'nokey', via: 'apikey' };
   if (out.claude.installed) {
     const r = await run(findExe('claude'), ['auth', 'status'], { cwd: os.tmpdir(), env: childEnv() });
     try { const d = JSON.parse(r.out); out.claude.login = d.loggedIn && d.authMethod !== 'api_key' ? 'yes' : 'no'; } catch {}
@@ -303,6 +350,17 @@ export function createServer() {
 
       if (url.pathname === '/api/status' && req.method === 'GET') return send(res, 200, { ok: true, providers: await status() });
 
+      if (url.pathname === '/api/gemini-key' && req.method === 'POST') {
+        if (!(req.headers['content-type'] || '').startsWith('application/json')) return send(res, 415, { error: 'json only' });
+        let body;
+        try { body = await readJson(req); } catch { return send(res, 400, { error: '依頼の形が正しくありません。' }); }
+        const key = typeof body?.key === 'string' ? body.key.trim() : '';
+        if (!key) { await keychainDelete(); return send(res, 200, { ok: true, has: false }); }
+        if (!validGeminiKey(key)) return send(res, 200, { ok: false, error: 'APIキーの形が正しくありません。AI Studio でコピーしたキーをそのまま貼ってください。' });
+        const ok = await keychainSet(key);
+        return send(res, 200, ok ? { ok: true, has: true } : { ok: false, error: 'キーチェーンに保存できませんでした。' });
+      }
+
       if (url.pathname === '/api/ask' && req.method === 'POST') {
         if (!(req.headers['content-type'] || '').startsWith('application/json')) return send(res, 415, { error: 'json only' });
         let body;
@@ -329,7 +387,6 @@ export function createServer() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  ensureGeminiHome();
   const server = createServer();
   server.on('error', (e) => {
     if (e.code === 'EADDRINUSE') console.error(`ポート ${PORT} はすでに使われています（鼎談がもう起動しているかもしれません）。`);

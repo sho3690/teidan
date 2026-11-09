@@ -313,3 +313,7 @@ fieldset.members legend { font-weight: 600; font-size: 0.9375rem; margin-bottom:
 
 .provider > .help + .field { margin-top: var(--space-4); }
 .provider > .status { margin-top: 0; }
+.btn-danger-text { color: var(--color-error); }
+.btn-danger-text:hover { background: var(--color-error-muted); }
+.provider .field > .actions { margin-top: var(--space-3); }
+.provider .field > .help + label { margin-top: var(--space-4); }

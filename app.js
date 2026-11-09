@@ -220,8 +220,8 @@ const LOCAL_GUIDE = {
     placeholder: '空欄で標準（例：gpt-5.6-sol）',
   },
   gemini: {
-    login: 'teidan フォルダの「Geminiにログイン.command」をダブルクリックし、「Sign in with Google」を選びます。終わったら /quit で閉じます。',
-    placeholder: '空欄で標準（例：gemini-3.1-pro-preview）',
+    login: '',
+    placeholder: '空欄で標準（gemini-pro-latest、上限なら flash に切り替え）',
   },
 };
 
@@ -285,7 +285,8 @@ function openLocal() {
     title.append(mark, el('span', null, PROVIDERS[pid].name));
 
     let stateText; let cls = 'ok';
-    if (!info.installed) { stateText = 'このMacにコマンドが見つかりません。'; cls = 'err'; }
+    if (info.via === 'apikey') { stateText = info.installed ? 'APIキーを設定済みです（Macのキーチェーンに保存）。' : 'APIキーが未設定です。下で入れてください。'; cls = info.installed ? 'ok' : 'err'; }
+    else if (!info.installed) { stateText = 'このMacにコマンドが見つかりません。'; cls = 'err'; }
     else if (info.login === 'yes') stateText = 'ログインしています。';
     else if (info.login === 'apikey') { stateText = 'APIキーでログインしています。サブスクの枠を使うには、ChatGPTのアカウントでログインし直してください。'; cls = 'err'; }
     else if (info.login === 'no') { stateText = 'ログインしていません。'; cls = 'err'; }
@@ -293,7 +294,7 @@ function openLocal() {
     const st = el('p', `help status ${cls}`, stateText);
     st.setAttribute('aria-live', 'polite');
 
-    const login = el('p', 'help', `ログインのしかた：${LOCAL_GUIDE[pid].login}`);
+    const login = info.via === 'apikey' ? geminiKeyBlock(st, () => test) : el('p', 'help', `ログインのしかた：${LOCAL_GUIDE[pid].login}`);
 
     const field = el('div', 'field');
     const id = `local-model-${pid}`;
@@ -331,6 +332,57 @@ function openLocal() {
     list.append(panel);
   });
   show('local');
+}
+
+function geminiKeyBlock(st, getTest) {
+  const box = el('div', 'field');
+  const note = el('p', 'help');
+  note.append('Gemini は個人のGoogleアカウントでのCLI提供が終わったため、APIキーで参加します。');
+  const a = el('a', null, 'Google AI Studio');
+  a.href = 'https://aistudio.google.com/apikey'; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  note.append(a, ' で無料で発行できます。無料枠では、入力した内容が Google のサービス改善に使われることがあるので、機密は入れないでください。');
+  const lab = el('label', null, 'APIキー');
+  lab.htmlFor = 'local-gemini-key';
+  const input = el('input');
+  input.type = 'password'; input.id = 'local-gemini-key'; input.autocomplete = 'off'; input.spellcheck = false;
+  input.placeholder = state.local.gemini.installed ? '設定済み（変えるときだけ入れてください）' : 'AIza…';
+  const row = el('div', 'actions');
+  const save = el('button', 'btn btn-secondary', 'キーを保存');
+  save.type = 'button';
+  const del = el('button', 'btn btn-tertiary btn-danger-text', 'キーを消す');
+  del.type = 'button';
+  del.hidden = !state.local.gemini.installed;
+  const post = async (key) => {
+    const res = await fetch('/api/gemini-key', { method: 'POST', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-teidan': '1' }, body: JSON.stringify({ key }) });
+    return res.json();
+  };
+  const apply = (has, msg, ok) => {
+    state.local.gemini.installed = has;
+    del.hidden = !has;
+    input.value = '';
+    input.placeholder = has ? '設定済み（変えるときだけ入れてください）' : 'AIza…';
+    const t = getTest(); if (t) t.disabled = !has;
+    st.className = `help status ${ok ? 'ok' : 'err'}`; st.textContent = msg;
+  };
+  save.addEventListener('click', async () => {
+    const key = input.value.trim();
+    if (!key) { st.className = 'help status err'; st.textContent = 'APIキーを入れてから「キーを保存」を押してください。'; input.focus(); return; }
+    save.disabled = true;
+    try {
+      const r = await post(key);
+      if (r.ok) apply(true, 'APIキーをMacのキーチェーンに保存しました。「つながるか試す」で確かめられます。', true);
+      else { st.className = 'help status err'; st.textContent = r.error || '保存できませんでした。'; }
+    } catch (_) { st.className = 'help status err'; st.textContent = '鼎談のサーバーにつながりません。'; }
+    finally { save.disabled = false; }
+  });
+  del.addEventListener('click', async () => {
+    if (del.dataset.confirm !== '1') { del.dataset.confirm = '1'; del.textContent = 'もう一度押すと消します'; return; }
+    del.dataset.confirm = ''; del.textContent = 'キーを消す';
+    try { await post(''); apply(false, 'APIキーを消しました。', false); } catch (_) {}
+  });
+  row.append(save, del);
+  box.append(note, lab, input, row);
+  return box;
 }
 
 function explainError(err, pid) {
@@ -692,7 +744,7 @@ function renderMembers() {
     const mark = el('span', 'mark', PROVIDERS[pid].mark);
     mark.setAttribute('aria-hidden', 'true');
     const txt = el('span');
-    txt.append(el('span', null, PROVIDERS[pid].name + ' '), el('span', 'model', has ? modelLabel(pid) : (state.mode === 'local' ? '（このMacに見つかりません）' : '（キー未設定）')));
+    txt.append(el('span', null, PROVIDERS[pid].name + ' '), el('span', 'model', has ? modelLabel(pid) : (state.mode === 'local' ? (pid === 'gemini' ? '（APIキー未設定）' : '（このMacに見つかりません）') : '（キー未設定）')));
     lab.append(cb, mark, txt);
     cb.dataset.pid = pid;
     list.append(lab);

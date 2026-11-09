@@ -6,7 +6,7 @@ Claude・ChatGPT・Gemini の3つのAIが話し合って、ひとつの結論を
 
 | | サブスク版（おすすめ） | APIキー版 |
 | --- | --- | --- |
-| 使う枠 | Claude Pro/Max・ChatGPT Plus/Pro・Google AI Pro などのサブスク | 各社APIの従量課金 |
+| 使う枠 | Claude・ChatGPT はサブスク、Gemini は APIキー（無料枠あり） | 各社APIの従量課金 |
 | 開き方 | Macで「鼎談を起動.command」をダブルクリック | https://sho3690.github.io/teidan/ |
 | 動く場所 | このMacの中だけ | ブラウザ（スマホ可） |
 
@@ -26,9 +26,9 @@ Claude・ChatGPT・Gemini の3つのAIが話し合って、ひとつの結論を
 | --- | --- | --- |
 | Claude | `claude`（Claude Code） | ターミナルで `claude` → `/login`（claude.ai のアカウント） |
 | ChatGPT | `codex`（Codex CLI） | ターミナルで `codex login` →「Sign in with ChatGPT」 |
-| Gemini | `gemini`（Gemini CLI） | 「Geminiにログイン.command」をダブルクリック →「Sign in with Google」 |
+| Gemini | （APIを直接呼ぶ） | 設定画面で Google AI Studio の APIキーを入れる |
 
-Gemini は、普段の Gemini CLI の設定（APIキー・フック・連携）とは別の、鼎談専用の場所（`~/.teidan/gemini-home`）でログインします。
+**Gemini だけは APIキーです。** 個人の Google アカウントでの Gemini CLI は 2026年6月18日に提供が終わりました。後継の Antigravity CLI は、他のアプリに組み込んで使うことが個人向けプランの規約で認められておらず、アカウント停止のおそれがあります。そのため、Google が勧める AI Studio の APIキー（https://aistudio.google.com/apikey 、無料枠あり）で参加します。キーは Mac のキーチェーンに保存し、画面には表示しません。無料枠では入力内容が Google のサービス改善に使われることがあるので、機密は入れないでください。
 
 ### 起動
 
