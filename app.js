@@ -23,6 +23,8 @@ const state = {
   saveLocal: true,
   running: null,         // AbortController
   log: null,             // 直近の話し合いの記録
+  mode: 'api',           // 'api'（APIキー）または 'local'（このMacのサブスク）
+  local: null,           // サブスク版：各CLIの状態
 };
 
 const $ = (id) => document.getElementById(id);
@@ -32,7 +34,7 @@ const dec = new TextDecoder();
 /* ---------------- 保存（設定・暗号化された鍵） ---------------- */
 
 function loadPrefs() {
-  const base = { models: {}, modelLists: {}, enabled: { claude: true, openai: true, gemini: true }, rounds: '2', moderator: 'claude' };
+  const base = { models: {}, modelLists: {}, localModels: {}, enabled: { claude: true, openai: true, gemini: true }, rounds: '2', moderator: 'claude' };
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (raw) return Object.assign(base, JSON.parse(raw));
@@ -200,10 +202,142 @@ function compareVersionDesc(a, b) {
   return a.length - b.length || a.localeCompare(b);
 }
 
+/* ---------------- サブスク版（このMacのサーバー経由） ---------------- */
+
+class LocalError extends Error {
+  constructor(message, kind) { super(message); this.kind = kind; }
+}
+
+const LOCAL_TIMEOUT_MS = 7 * 60 * 1000;
+
+const LOCAL_GUIDE = {
+  claude: {
+    login: 'ターミナルで claude を開き、/login で claude.ai のアカウントにログインします。',
+    placeholder: '空欄で標準（例：opus、sonnet）',
+  },
+  openai: {
+    login: 'ターミナルで codex login を実行し、「Sign in with ChatGPT」を選びます。',
+    placeholder: '空欄で標準（例：gpt-5.6-sol）',
+  },
+  gemini: {
+    login: 'teidan フォルダの「Geminiにログイン.command」をダブルクリックし、「Sign in with Google」を選びます。終わったら /quit で閉じます。',
+    placeholder: '空欄で標準（例：gemini-3.1-pro-preview）',
+  },
+};
+
+async function detectLocal() {
+  if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(location.hostname)) return false;
+  try {
+    const res = await fetch('/api/status', { headers: { 'x-teidan': '1' }, cache: 'no-store' });
+    const body = await res.json();
+    if (!body.ok) return false;
+    state.local = body.providers;
+    return true;
+  } catch (_) { return false; }
+}
+
+async function localChat(pid, system, user, signal) {
+  const t = withTimeout(signal, LOCAL_TIMEOUT_MS);
+  try {
+    let res;
+    try {
+      res = await fetch('/api/ask', {
+        method: 'POST', signal: t.signal, cache: 'no-store',
+        headers: { 'content-type': 'application/json', 'x-teidan': '1' },
+        body: JSON.stringify({ pid, model: state.prefs.localModels[pid] || '', system, prompt: user }),
+      });
+    } catch (err) {
+      if (err && (err.name === 'AbortError' || err.name === 'TimeoutError')) throw err;
+      throw new LocalError('鼎談のサーバーが止まっています。teidan フォルダの「鼎談を起動.command」をもう一度開いてください。', 'server');
+    }
+    const body = await res.json().catch(() => ({}));
+    if (body.text) return body.text;
+    throw new LocalError(body.error || `${PROVIDERS[pid].name} が応答に失敗しました。`, body.kind || 'other');
+  } finally {
+    t.done();
+  }
+}
+
+function callAI(pid, system, user, signal) {
+  if (state.mode === 'local') return localChat(pid, system, user, signal);
+  return api[pid].chat(state.keys[pid], state.prefs.models[pid], system, user, signal);
+}
+
+function modelLabel(pid) {
+  if (state.mode === 'local') return state.prefs.localModels[pid] || '標準のモデル';
+  return state.prefs.models[pid] || '';
+}
+
+function isAvailable(pid) {
+  if (state.mode === 'local') return !!(state.local && state.local[pid] && state.local[pid].installed);
+  return !!state.keys[pid];
+}
+
+function openLocal() {
+  const list = $('local-list');
+  list.replaceChildren();
+  ORDER.forEach((pid) => {
+    const info = (state.local && state.local[pid]) || {};
+    const panel = el('div', 'panel provider');
+    const title = el('h2', 'provider-title');
+    const mark = el('span', 'mark', PROVIDERS[pid].mark);
+    mark.setAttribute('aria-hidden', 'true');
+    title.append(mark, el('span', null, PROVIDERS[pid].name));
+
+    let stateText; let cls = 'ok';
+    if (!info.installed) { stateText = 'このMacにコマンドが見つかりません。'; cls = 'err'; }
+    else if (info.login === 'yes') stateText = 'ログインしています。';
+    else if (info.login === 'apikey') { stateText = 'APIキーでログインしています。サブスクの枠を使うには、ChatGPTのアカウントでログインし直してください。'; cls = 'err'; }
+    else if (info.login === 'no') { stateText = 'ログインしていません。'; cls = 'err'; }
+    else stateText = 'ログインしているかは「つながるか試す」で確かめられます。';
+    const st = el('p', `help status ${cls}`, stateText);
+    st.setAttribute('aria-live', 'polite');
+
+    const login = el('p', 'help', `ログインのしかた：${LOCAL_GUIDE[pid].login}`);
+
+    const field = el('div', 'field');
+    const id = `local-model-${pid}`;
+    const lab = el('label', null, 'モデル');
+    lab.htmlFor = id;
+    const input = el('input');
+    input.type = 'text'; input.id = id; input.autocomplete = 'off'; input.spellcheck = false;
+    input.placeholder = LOCAL_GUIDE[pid].placeholder;
+    input.value = state.prefs.localModels[pid] || '';
+    input.addEventListener('change', () => { state.prefs.localModels[pid] = input.value.trim(); savePrefs(); });
+    field.append(lab, input);
+
+    const actions = el('div', 'actions');
+    const test = el('button', 'btn btn-secondary', 'つながるか試す');
+    test.type = 'button';
+    test.disabled = !info.installed;
+    test.addEventListener('click', async () => {
+      state.prefs.localModels[pid] = input.value.trim(); savePrefs();
+      test.disabled = true; test.textContent = '試しています…';
+      st.className = 'help status'; st.textContent = `${PROVIDERS[pid].name} に短い質問を送っています（数秒〜1分）…`;
+      const t0 = performance.now();
+      try {
+        await localChat(pid, '短く答えてください。', 'これは接続テストです。「OK」とだけ返してください。');
+        st.className = 'help status ok';
+        st.textContent = `つながりました（${fmtSec(performance.now() - t0)}）。サブスクの枠で話し合いに参加できます。`;
+      } catch (err) {
+        st.className = 'help status err';
+        st.textContent = explainError(err, pid);
+      } finally {
+        test.disabled = false; test.textContent = 'つながるか試す';
+      }
+    });
+    actions.append(test);
+    panel.append(title, st, login, field, actions);
+    list.append(panel);
+  });
+  show('local');
+}
+
 function explainError(err, pid) {
+  if (err instanceof LocalError) return err.message;
   const name = PROVIDERS[pid].name;
   if (err && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
-    return err.name === 'TimeoutError' ? `${name} の返事が4分以上来なかったので、打ち切りました。` : '止めました。';
+    return err.name === 'TimeoutError' ? `${name} の返事に時間がかかりすぎたので、打ち切りました。` : '止めました。';
   }
   if (err instanceof ApiError) {
     const d = err.detail ? `（${err.detail}）` : '';
@@ -277,7 +411,7 @@ async function runDiscussion(question, members, extraRounds, moderator) {
   const ctrl = new AbortController();
   state.running = ctrl;
   const log = { question, members: members.slice(), models: {}, rounds: [], final: null, startedAt: new Date() };
-  members.forEach((m) => { log.models[m] = state.prefs.models[m]; });
+  members.forEach((m) => { log.models[m] = modelLabel(m); });
   state.log = log;
 
   renderResultShell(question);
@@ -310,7 +444,7 @@ async function runDiscussion(question, members, extraRounds, moderator) {
     const box = renderConclusion(mod);
     const t0 = performance.now();
     try {
-      const text = await api[mod].chat(state.keys[mod], state.prefs.models[mod],
+      const text = await callAI(mod,
         'あなたは公平な議事進行役です。日本語で、平易に書いてください。', finalPrompt(question, log.rounds, members), ctrl.signal);
       log.final = { pid: mod, text };
       fillConclusion(box, text, performance.now() - t0);
@@ -331,7 +465,7 @@ async function askOne(pid, system, prompt, signal, section) {
   const card = renderCard(section, pid);
   const t0 = performance.now();
   try {
-    const text = await api[pid].chat(state.keys[pid], state.prefs.models[pid], system, prompt, signal);
+    const text = await callAI(pid, system, prompt, signal);
     if (!text) throw new ApiError(200, '空の応答');
     fillCard(card, text, performance.now() - t0);
     return { pid, text };
@@ -371,7 +505,7 @@ function renderMarkdown(src, opts = {}) {
     else out.push(isStance && !opts.conclusion ? `<p class="stance">${html}</p>` : `<p>${html}</p>`);
     para = [];
   };
-  const flushList = () => { if (list) { out.push(`<${list.tag}>${list.items.map((i) => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`); list = null; } };
+  const flushList = () => { if (list) { out.push(`<${list.tag}${list.tag === 'ol' && list.start > 1 ? ` start="${list.start}"` : ''}>${list.items.map((i) => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`); list = null; } };
 
   for (const line of lines) {
     if (code) {
@@ -382,7 +516,7 @@ function renderMarkdown(src, opts = {}) {
     if (/^```/.test(line)) { flushPara(); flushList(); code = []; continue; }
     const h = line.match(/^#{1,6}\s+(.*)$/);
     const ul = line.match(/^\s*(?:[-*・])\s+(.*)$/);
-    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    const ol = line.match(/^\s*(\d+)[.)]\s+(.*)$/);
     if (h) {
       flushPara(); flushList();
       out.push(`<h3>${inline(h[1])}</h3>`);
@@ -390,8 +524,8 @@ function renderMarkdown(src, opts = {}) {
     } else if (ul || ol) {
       flushPara();
       const tag = ul ? 'ul' : 'ol';
-      if (!list || list.tag !== tag) { flushList(); list = { tag, items: [] }; }
-      list.items.push((ul || ol)[1]);
+      if (!list || list.tag !== tag) { flushList(); list = { tag, items: [], start: ol ? parseInt(ol[1], 10) : 1 }; }
+      list.items.push(ul ? ul[1] : ol[2]);
     } else if (!line.trim()) {
       flushPara(); flushList();
     } else {
@@ -428,7 +562,7 @@ function cardHead(pid) {
   const mark = el('span', 'mark', PROVIDERS[pid].mark);
   mark.setAttribute('aria-hidden', 'true');
   const names = el('div');
-  names.append(el('div', 'card-name', PROVIDERS[pid].name), el('div', 'card-model', state.prefs.models[pid] || ''));
+  names.append(el('div', 'card-name', PROVIDERS[pid].name), el('div', 'card-model', modelLabel(pid)));
   const time = el('span', 'card-time');
   head.append(mark, names, time);
   return { head, time };
@@ -472,7 +606,7 @@ function renderConclusion(pid) {
   const sec = el('section', 'conclusion');
   const head = el('div', 'round-head');
   head.append(el('span', 'round-no', 'Summary'), el('h3', 'round-title', 'まとめ'));
-  const by = el('p', 'by', `まとめ役：${PROVIDERS[pid].name}（${state.prefs.models[pid]}）`);
+  const by = el('p', 'by', `まとめ役：${PROVIDERS[pid].name}（${modelLabel(pid)}）`);
   const body = el('div', 'card-body');
   body.append(thinkingNode('話し合いをまとめています'));
   sec.append(head, by, body);
@@ -530,10 +664,11 @@ function exportMarkdown() {
 /* ---------------- 画面の切り替え ---------------- */
 
 function show(view) {
-  ['lock', 'setup', 'main'].forEach((v) => { $(`view-${v}`).hidden = v !== view; });
+  ['lock', 'setup', 'local', 'main'].forEach((v) => { $(`view-${v}`).hidden = v !== view; });
   const unlocked = view === 'main';
-  $('btn-settings').hidden = !unlocked;
-  $('btn-lock').hidden = !(unlocked && hasVault());
+  $('btn-settings').hidden = !(unlocked || view === 'local');
+  $('btn-settings').textContent = view === 'local' ? '話し合いへ' : '設定';
+  $('btn-lock').hidden = !(unlocked && hasVault() && state.mode !== 'local');
   if (view === 'lock') setTimeout(() => $('lock-pass').focus(), 0);
   if (view === 'main') renderMembers();
   window.scrollTo(0, 0);
@@ -547,7 +682,7 @@ function renderMembers() {
   const list = $('member-list');
   list.replaceChildren();
   ORDER.forEach((pid) => {
-    const has = !!state.keys[pid];
+    const has = isAvailable(pid);
     const lab = el('label', 'member' + (has ? '' : ' disabled'));
     const cb = el('input');
     cb.type = 'checkbox';
@@ -557,7 +692,7 @@ function renderMembers() {
     const mark = el('span', 'mark', PROVIDERS[pid].mark);
     mark.setAttribute('aria-hidden', 'true');
     const txt = el('span');
-    txt.append(el('span', null, PROVIDERS[pid].name + ' '), el('span', 'model', has ? state.prefs.models[pid] : '（キー未設定）'));
+    txt.append(el('span', null, PROVIDERS[pid].name + ' '), el('span', 'model', has ? modelLabel(pid) : (state.mode === 'local' ? '（このMacに見つかりません）' : '（キー未設定）')));
     lab.append(cb, mark, txt);
     cb.dataset.pid = pid;
     list.append(lab);
@@ -763,7 +898,11 @@ function init() {
     $(`key-${pid}`).addEventListener('change', () => fetchModels(pid, { auto: true }));
     $(`model-${pid}`).addEventListener('change', () => { state.prefs.models[pid] = $(`model-${pid}`).value; savePrefs(); });
   });
-  $('btn-settings').addEventListener('click', () => openSetup(true));
+  $('btn-settings').addEventListener('click', () => {
+    if (state.mode === 'local') { if (!$('view-local').hidden) show('main'); else openLocal(); }
+    else openSetup(true);
+  });
+  $('btn-local-done').addEventListener('click', () => show('main'));
   $('btn-lock').addEventListener('click', lockNow);
   $('btn-start').addEventListener('click', start);
   $('question').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) start(); });
@@ -774,7 +913,15 @@ function init() {
   if (!window.crypto || !crypto.subtle) {
     document.body.prepend(el('p', 'notice', 'このブラウザでは暗号化が使えません。最新のChrome・Safari・Edgeで開いてください。'));
   }
-  if (hasVault()) show('lock'); else openSetup(false);
+  detectLocal().then((local) => {
+    if (local) {
+      state.mode = 'local';
+      $('foot-note').textContent = 'サブスク版 · このMacの中だけで動いています · v1.1';
+      show('main');
+    }
+    else if (hasVault()) show('lock');
+    else openSetup(false);
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);

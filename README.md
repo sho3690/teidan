@@ -1,8 +1,14 @@
 # 鼎談 TEIDAN
 
-Claude・ChatGPT・Gemini の3つのAIが話し合って、ひとつの結論を出すWebアプリです。
+Claude・ChatGPT・Gemini の3つのAIが話し合って、ひとつの結論を出すアプリです。
 
-**使う：** https://sho3690.github.io/teidan/
+使い方は2通りあります。
+
+| | サブスク版（おすすめ） | APIキー版 |
+| --- | --- | --- |
+| 使う枠 | Claude Pro/Max・ChatGPT Plus/Pro・Google AI Pro などのサブスク | 各社APIの従量課金 |
+| 開き方 | Macで「鼎談を起動.command」をダブルクリック | https://sho3690.github.io/teidan/ |
+| 動く場所 | このMacの中だけ | ブラウザ（スマホ可） |
 
 ## 話し合いの流れ
 
@@ -12,9 +18,34 @@ Claude・ChatGPT・Gemini の3つのAIが話し合って、ひとつの結論を
 
 結果は「テキストで保存」で Markdown ファイルとして保存できます。
 
-## 必要なもの
+## サブスク版
 
-各社の **APIキー**（2つ以上）。ChatGPT Plus などの月額プランとは別の、従量課金です。
+このMacにログイン済みの3つのコマンドを使います。
+
+| AI | コマンド | ログインのしかた |
+| --- | --- | --- |
+| Claude | `claude`（Claude Code） | ターミナルで `claude` → `/login`（claude.ai のアカウント） |
+| ChatGPT | `codex`（Codex CLI） | ターミナルで `codex login` →「Sign in with ChatGPT」 |
+| Gemini | `gemini`（Gemini CLI） | 「Geminiにログイン.command」をダブルクリック →「Sign in with Google」 |
+
+Gemini は、普段の Gemini CLI の設定（APIキー・フック・連携）とは別の、鼎談専用の場所（`~/.teidan/gemini-home`）でログインします。
+
+### 起動
+
+1. `鼎談を起動.command` をダブルクリックします（初回は右クリック →「開く」）。
+2. ブラウザで http://127.0.0.1:8796/ が開きます。
+3. 使い終わったら、ターミナルのウィンドウを閉じると止まります。
+
+### 安全のための決まりごと
+
+- サーバーは 127.0.0.1 だけで待ち受けます。ほかのパソコンやスマホからは届きません。
+- ほかのWebサイトからの呼び出しは、Host・Origin・専用ヘッダーの確認で断ります。
+- AIには道具（ファイルの読み書き・コマンド実行・Web検索・外部連携）を持たせず、文章を返すだけにしています。毎回空の一時フォルダで動かし、終わったら消します。
+- APIキーの環境変数は子プロセスに渡しません（従量課金に切り替わらないように）。
+
+## APIキー版
+
+各社の **APIキー**（2つ以上）を画面に入れて使います。
 
 | AI | キーの発行場所 |
 | --- | --- |
@@ -22,17 +53,10 @@ Claude・ChatGPT・Gemini の3つのAIが話し合って、ひとつの結論を
 | ChatGPT | https://platform.openai.com/api-keys |
 | Gemini | https://aistudio.google.com/apikey |
 
-各社の管理画面で、月の上限額を決めておくと安心です。
-
-## キーの扱い
-
-- キーはブラウザから各社のAPIへ直接送られるだけです。このリポジトリやGitHub、その他のサーバーには送られません。
+- キーはブラウザから各社のAPIへ直接送られるだけです。GitHubやその他のサーバーには送られません。
 - 「この端末に保存する」を選ぶと、合言葉（8文字以上）で暗号化（PBKDF2 + AES-GCM）してブラウザに保存します。
-- 保存しない場合、ページを閉じるとキーは消えます。
-- ページ内で読み込めるのは自分のファイルと3社のAPIだけに制限しています（Content Security Policy）。
+- 各社の管理画面で、月の上限額を決めておくと安心です。
 
 ## 仕組み
 
-ビルド不要の静的サイトです（`index.html` / `style.css` / `app.js`）。GitHub Pages で公開しています。
-
-モデルは、キーを入れた時に各社の一覧を取得し、上位のモデルを自動で選びます。設定画面で変更できます。
+ビルド不要です。`index.html` / `style.css` / `app.js` が画面、`server.mjs`（Node.js のみ・追加パッケージなし）がサブスク版のサーバーです。

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
 <title>鼎談 TEIDAN</title>
@@ -49,6 +49,7 @@
   <section class="view narrow" id="view-setup" hidden>
     <h1 class="view-title">APIキーの設定</h1>
     <p class="lead">使いたいAIのAPIキーを入れてください。2つ以上あれば話し合いができます。</p>
+    <p class="note">サブスクの枠で使いたい場合は、Macで「鼎談を起動.command」から開くサブスク版を使ってください（<a href="https://github.com/sho3690/teidan#サブスク版" target="_blank" rel="noopener noreferrer">使い方</a>）。</p>
 
     <div class="panel info">
       <p><strong>キーの行き先：</strong>キーはこのページから各社のAPIへ直接送られるだけで、GitHubや他の場所には送られません。</p>
@@ -131,6 +132,20 @@
     </div>
   </section>
 
+  <!-- サブスク版の設定 -->
+  <section class="view narrow" id="view-local" hidden>
+    <h1 class="view-title">サブスク版の設定</h1>
+    <p class="lead">このMacでログインしている Claude・ChatGPT・Gemini を使います。APIキーは要りません。</p>
+    <div class="panel info">
+      <p><strong>使う枠：</strong>それぞれのサブスク（Claude Pro/Max、ChatGPT Plus/Pro、Google AI Pro など）の利用枠を使います。APIの従量課金はかかりません。</p>
+      <p><strong>安全のため：</strong>AIにはファイルの読み書き・コマンド実行・Web検索・外部連携などの道具を持たせず、文章を返すだけにしています。</p>
+    </div>
+    <div id="local-list"></div>
+    <div class="actions">
+      <button type="button" class="btn btn-primary" id="btn-local-done">話し合いの画面へ</button>
+    </div>
+  </section>
+
   <!-- 話し合い -->
   <section class="view" id="view-main" hidden>
     <div class="ask narrow">
@@ -181,7 +196,7 @@
 </main>
 
 <footer class="foot">
-  <p>APIキーはこの端末の中だけで扱います · v1.0</p>
+  <p id="foot-note">APIキーはこの端末の中だけで扱います · v1.1</p>
 </footer>
 </body>
 </html>
