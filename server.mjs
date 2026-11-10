@@ -131,7 +131,7 @@ const KC_SERVICE = 'teidan.gemini-api-key';
 const KC_ACCOUNT = 'teidan';
 const SECURITY = '/usr/bin/security';
 // 無料枠では pro 系の上限が 0（使えない）。混雑（503）も多いので、flash 系を順に試す
-const GEMINI_DEFAULT_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
+const GEMINI_DEFAULT_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
 
 async function keychainGet() {
   const r = await run(SECURITY, ['find-generic-password', '-s', KC_SERVICE, '-a', KC_ACCOUNT, '-w'], { cwd: os.tmpdir(), env: childEnv() });
@@ -227,6 +227,7 @@ export const PROVIDERS = {
   openai: {
     name: 'ChatGPT',
     exe: 'codex',
+    defaultName: 'gpt-5.6-sol',
     args({ model, dir }) {
       return ['exec', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral',
         '-s', 'read-only', '-C', dir, '--color', 'never',
@@ -271,22 +272,45 @@ export async function ask(pid, { system, prompt, model }, signal) {
   if (running >= MAX_PARALLEL) return { error: '同時に動かせる数を超えました。少し待ってください。', kind: 'busy' };
 
   running++;
-  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), `teidan-${pid}-`));
   try {
-    const ctx = { system, prompt, model: sanitizeModel(model), dir };
-    if (p.prepare) await p.prepare(ctx);
-    const r = await run(exe, p.args(ctx), { input: p.input(ctx), cwd: dir, env: childEnv(p.env(ctx)), signal });
-    if (r.aborted) return { error: '止めました。', kind: 'aborted' };
-    if (r.timedOut) return { error: `${p.name} の返事が6分以上来なかったので、打ち切りました。`, kind: 'timeout' };
-    const res = await p.parse(r, dir);
-    if (res.text) return { text: res.text };
-    const e = explain(p.name, String(res.fail || ''));
-    return { error: e.message, kind: e.kind };
+    const chosen = sanitizeModel(model);
+    // 指定がなければ、使いたいモデルから順に試す。断られたモデルはしばらく飛ばす
+    const all = chosen ? [chosen] : (CLI_DEFAULT_MODELS[pid] || ['']);
+    const candidates = all.filter((m, i) => i === all.length - 1 || !isRefused(pid, m));
+    let e = null;
+    for (let i = 0; i < candidates.length; i++) {
+      const m = candidates[i];
+      const dir = await fsp.mkdtemp(path.join(os.tmpdir(), `teidan-${pid}-`));
+      try {
+        const ctx = { system, prompt, model: m, dir };
+        if (p.prepare) await p.prepare(ctx);
+        const r = await run(exe, p.args(ctx), { input: p.input(ctx), cwd: dir, env: childEnv(p.env(ctx)), signal });
+        if (r.aborted) return { error: '止めました。', kind: 'aborted' };
+        if (r.timedOut) return { error: `${p.name} の返事が6分以上来なかったので、打ち切りました。`, kind: 'timeout' };
+        const res = await p.parse(r, dir);
+        if (res.text) return { text: res.text, model: m || p.defaultName || '' };
+        e = explain(p.name, String(res.fail || ''));
+        if (!chosen && e.kind === 'model' && i < candidates.length - 1) { refuse(pid, m); continue; }
+        return { error: e.message, kind: e.kind };
+      } finally {
+        fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
+    }
+    return { error: e ? e.message : `${p.name} が応答に失敗しました。`, kind: e ? e.kind : 'other' };
   } finally {
     running--;
-    fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+// 「使いたいモデル」→ だめなら各CLIの標準（''）。空文字は --model を付けない
+const CLI_DEFAULT_MODELS = {
+  claude: ['claude-opus-5-5', ''],
+  openai: ['gpt-6.1-sol', ''],
+};
+const REFUSE_MS = 6 * 60 * 60 * 1000;
+const refused = new Map();
+function isRefused(pid, m) { const t = refused.get(`${pid}:${m}`); return !!t && Date.now() - t < REFUSE_MS; }
+function refuse(pid, m) { refused.set(`${pid}:${m}`, Date.now()); }
 
 function sanitizeModel(m) {
   if (!m) return '';

@@ -25,7 +25,11 @@ const state = {
   log: null,             // 直近の話し合いの記録
   mode: 'api',           // 'api'（APIキー）または 'local'（このMacのサブスク）
   local: null,           // サブスク版：各CLIの状態
+  usedModels: {},        // サブスク版：実際に答えたモデル
 };
+
+// サブスク版で、モデル欄が空のときに使うモデル（使えなければサーバーが自動で切り替える）
+const LOCAL_DEFAULT_MODELS = { claude: 'claude-opus-5-5', openai: 'gpt-6.1-sol', gemini: 'gemini-3.8-flash' };
 
 const $ = (id) => document.getElementById(id);
 const enc = new TextEncoder();
@@ -213,15 +217,15 @@ const LOCAL_TIMEOUT_MS = 7 * 60 * 1000;
 const LOCAL_GUIDE = {
   claude: {
     login: 'ターミナルで claude を開き、/login で claude.ai のアカウントにログインします。',
-    placeholder: '空欄で標準（例：opus、sonnet）',
+    placeholder: '空欄で Opus 5.5（使えなければ標準のモデル）',
   },
   openai: {
     login: 'ターミナルで codex login を実行し、「Sign in with ChatGPT」を選びます。',
-    placeholder: '空欄で標準（例：gpt-5.6-sol）',
+    placeholder: '空欄で gpt-6.1-sol（使えなければ gpt-5.6-sol）',
   },
   gemini: {
     login: '',
-    placeholder: '空欄で標準（flash 系。混雑・上限なら別のモデルに自動で切り替え）',
+    placeholder: '空欄で gemini-3.8-flash（混雑・上限なら別の flash に自動で切り替え）',
   },
 };
 
@@ -251,7 +255,7 @@ async function localChat(pid, system, user, signal) {
       throw new LocalError('鼎談のサーバーが止まっています。teidan フォルダの「鼎談を起動.command」をもう一度開いてください。', 'server');
     }
     const body = await res.json().catch(() => ({}));
-    if (body.text) return body.text;
+    if (body.text) { if (body.model) state.usedModels[pid] = body.model; return body.text; }
     throw new LocalError(body.error || `${PROVIDERS[pid].name} が応答に失敗しました。`, body.kind || 'other');
   } finally {
     t.done();
@@ -264,7 +268,7 @@ function callAI(pid, system, user, signal) {
 }
 
 function modelLabel(pid) {
-  if (state.mode === 'local') return state.prefs.localModels[pid] || '標準のモデル';
+  if (state.mode === 'local') return state.prefs.localModels[pid] || state.usedModels[pid] || LOCAL_DEFAULT_MODELS[pid] || '標準のモデル';
   return state.prefs.models[pid] || '';
 }
 
@@ -520,6 +524,8 @@ async function askOne(pid, system, prompt, signal, section) {
     const text = await callAI(pid, system, prompt, signal);
     if (!text) throw new ApiError(200, '空の応答');
     fillCard(card, text, performance.now() - t0);
+    const mEl = card.querySelector('.card-model'); if (mEl) mEl.textContent = modelLabel(pid);
+    if (state.log && state.log.models) state.log.models[pid] = modelLabel(pid);
     return { pid, text };
   } catch (err) {
     const msg = explainError(err, pid);
