@@ -360,7 +360,7 @@ function geminiKeyBlock(st, getTest) {
     state.local.gemini.installed = has;
     del.hidden = !has;
     input.value = '';
-    input.placeholder = has ? '設定済み（変えるときだけ入れてください）' : 'AIza…';
+    input.placeholder = has ? '設定済み（変えるときだけ入れてください）' : 'AQ.… または AIza…';
     const t = getTest(); if (t) t.disabled = !has;
     st.className = `help status ${ok ? 'ok' : 'err'}`; st.textContent = msg;
   };

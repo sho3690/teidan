@@ -138,7 +138,7 @@ async function keychainGet() {
 }
 
 export function validGeminiKey(key) {
-  return typeof key === 'string' && /^[A-Za-z0-9_\-]{20,200}$/.test(key);
+  return typeof key === 'string' && /^[A-Za-z0-9_.\-]{20,300}$/.test(key);
 }
 
 async function keychainSet(key) {
@@ -154,6 +154,9 @@ async function keychainDelete() {
 
 function geminiError(status, message) {
   const m = (message || '').toLowerCase();
+  if (/access_token_type_unsupported/.test(m)) {
+    return { kind: 'login', message: 'Gemini がこのキーを受け付けませんでした。AI Studio で古いキーを消し、新しいキーを作り直して入れてください。' };
+  }
   if (status === 400 && /api key/.test(m) || status === 401 || status === 403 && /api key|permission/.test(m)) {
     return { kind: 'login', message: 'Gemini のAPIキーが正しくないか、使えません。設定画面でキーを入れ直してください。' };
   }
@@ -354,7 +357,7 @@ export function createServer() {
         if (!(req.headers['content-type'] || '').startsWith('application/json')) return send(res, 415, { error: 'json only' });
         let body;
         try { body = await readJson(req); } catch { return send(res, 400, { error: '依頼の形が正しくありません。' }); }
-        const key = typeof body?.key === 'string' ? body.key.trim() : '';
+        const key = typeof body?.key === 'string' ? body.key.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/^GEMINI_API_KEY\s*=\s*/, '') : '';
         if (!key) { await keychainDelete(); return send(res, 200, { ok: true, has: false }); }
         if (!validGeminiKey(key)) return send(res, 200, { ok: false, error: 'APIキーの形が正しくありません。AI Studio でコピーしたキーをそのまま貼ってください。' });
         const ok = await keychainSet(key);
