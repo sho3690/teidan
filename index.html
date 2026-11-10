@@ -20,6 +20,7 @@
     </div>
     <p class="brand-desc">Claude・ChatGPT・Gemini が話し合って、ひとつの結論を出します</p>
     <div class="topbar-actions">
+      <button type="button" class="btn btn-tertiary" id="btn-new" hidden>新しい話し合い</button>
       <button type="button" class="btn btn-tertiary" id="btn-lock" hidden>鍵をかける</button>
       <button type="button" class="btn btn-secondary" id="btn-settings" hidden>設定</button>
     </div>
@@ -190,13 +191,16 @@
         </div>
       </div>
       <div id="rounds-out" class="wide"></div>
+      <div class="result-foot" id="result-foot" hidden>
+        <button type="button" class="btn btn-primary btn-lg" id="btn-new-bottom">新しい話し合いを始める</button>
+      </div>
     </div>
   </section>
 
 </main>
 
 <footer class="foot">
-  <p id="foot-note">APIキーはこの端末の中だけで扱います · v1.1</p>
+  <p id="foot-note">APIキーはこの端末の中だけで扱います · v1.2</p>
 </footer>
 </body>
 </html>

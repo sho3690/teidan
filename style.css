@@ -225,6 +225,7 @@ fieldset.members legend { font-weight: 600; font-size: 0.9375rem; margin-bottom:
 .result-q { font-size: 1.375rem; line-height: 1.4; margin: 0; flex: 1 1 420px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .result-tools { display: flex; align-items: center; gap: var(--space-3); }
 .progress { font-size: 0.875rem; color: var(--color-text-secondary); }
+.result-foot { display: flex; justify-content: center; margin-top: var(--space-10); padding-top: var(--space-8); border-top: 1px solid var(--color-border); }
 
 .round { margin-top: var(--space-10); }
 .round-head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-4); }

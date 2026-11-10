@@ -514,6 +514,7 @@ async function runDiscussion(question, members, extraRounds, moderator) {
     setRunning(false);
     setProgress(ctrl.signal.aborted ? '途中で止めました' : '終わりました');
     $('btn-export').hidden = !log.rounds.length;
+    $('result-foot').hidden = false;
   }
 }
 
@@ -602,6 +603,7 @@ function renderResultShell(question) {
   $('result-q').textContent = question;
   $('rounds-out').replaceChildren();
   $('btn-export').hidden = true;
+  $('result-foot').hidden = true;
   $('result').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
 }
 
@@ -692,6 +694,7 @@ function setRunning(on) {
   $('btn-start').disabled = on;
   $('btn-start').textContent = on ? '話し合っています…' : '話し合いを始める';
   $('btn-stop').hidden = !on;
+  $('btn-new').disabled = on;
   $('btn-settings').disabled = on;
   $('btn-lock').disabled = on;
 }
@@ -725,6 +728,7 @@ function show(view) {
   ['lock', 'setup', 'local', 'main'].forEach((v) => { $(`view-${v}`).hidden = v !== view; });
   const unlocked = view === 'main';
   $('btn-settings').hidden = !(unlocked || view === 'local');
+  $('btn-new').hidden = !unlocked;
   $('btn-settings').textContent = view === 'local' ? '話し合いへ' : '設定';
   $('btn-lock').hidden = !(unlocked && hasVault() && state.mode !== 'local');
   if (view === 'lock') setTimeout(() => $('lock-pass').focus(), 0);
@@ -898,6 +902,21 @@ async function unlock() {
   }
 }
 
+// 新しい話し合い：質問と結果を空にする（参加するAI・回数・まとめ役はそのまま）
+function newDiscussion() {
+  if (state.running) return;
+  $('question').value = '';
+  $('ask-error').hidden = true;
+  $('result').hidden = true;
+  $('result-foot').hidden = true;
+  $('rounds-out').replaceChildren();
+  $('btn-export').hidden = true;
+  setProgress('');
+  state.log = null;
+  window.scrollTo(0, 0);
+  $('question').focus();
+}
+
 function lockNow() {
   state.keys = { claude: '', openai: '', gemini: '' };
   state.passphrase = null;
@@ -966,6 +985,8 @@ function init() {
   $('question').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) start(); });
   $('btn-stop').addEventListener('click', () => { if (state.running) state.running.abort(new DOMException('aborted', 'AbortError')); });
   $('btn-export').addEventListener('click', exportMarkdown);
+  $('btn-new').addEventListener('click', newDiscussion);
+  $('btn-new-bottom').addEventListener('click', newDiscussion);
   $('moderator').addEventListener('change', () => { state.prefs.moderator = $('moderator').value; savePrefs(); });
 
   if (!window.crypto || !crypto.subtle) {
@@ -974,7 +995,7 @@ function init() {
   detectLocal().then((local) => {
     if (local) {
       state.mode = 'local';
-      $('foot-note').textContent = 'サブスク版 · このMacの中だけで動いています · v1.1';
+      $('foot-note').textContent = 'サブスク版 · このMacの中だけで動いています · v1.2';
       show('main');
     }
     else if (hasVault()) show('lock');
