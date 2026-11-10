@@ -221,7 +221,7 @@ const LOCAL_GUIDE = {
   },
   gemini: {
     login: '',
-    placeholder: '空欄で標準（gemini-pro-latest、上限なら flash に切り替え）',
+    placeholder: '空欄で標準（flash 系。混雑・上限なら別のモデルに自動で切り替え）',
   },
 };
 

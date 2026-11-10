@@ -130,7 +130,8 @@ export const CODEX_DISABLE = [
 const KC_SERVICE = 'teidan.gemini-api-key';
 const KC_ACCOUNT = 'teidan';
 const SECURITY = '/usr/bin/security';
-const GEMINI_DEFAULT_MODELS = ['gemini-pro-latest', 'gemini-flash-latest'];
+// 無料枠では pro 系の上限が 0（使えない）。混雑（503）も多いので、flash 系を順に試す
+const GEMINI_DEFAULT_MODELS = ['gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-lite-latest'];
 
 async function keychainGet() {
   const r = await run(SECURITY, ['find-generic-password', '-s', KC_SERVICE, '-a', KC_ACCOUNT, '-w'], { cwd: os.tmpdir(), env: childEnv() });
@@ -164,7 +165,7 @@ function geminiError(status, message) {
     return { kind: 'limit', message: 'Gemini の利用上限（無料枠）に達しました。時間をおくと使えるようになります。' };
   }
   if (status === 404) return { kind: 'model', message: 'Gemini では、そのモデルは使えません。設定でモデルを空欄（標準）に戻してください。' };
-  if (status >= 500) return { kind: 'other', message: 'Gemini 側が混み合っているか、不調です。少し待ってからもう一度お試しください。' };
+  if (status >= 500) return { kind: 'busy', message: 'Gemini 側が混み合っているか、不調です。少し待ってからもう一度お試しください。' };
   return explain('Gemini', message);
 }
 
@@ -197,8 +198,8 @@ async function geminiCall({ system, prompt, model }, signal) {
       return { error: `Gemini から答えが返りませんでした（${why}）。`, kind: 'other' };
     }
     last = geminiError(res.status, body && body.error && body.error.message);
-    // 標準モデルで上限・未対応なら、軽いモデルで試し直す
-    if (!model && (last.kind === 'limit' || last.kind === 'model') && i < models.length - 1) continue;
+    // 標準モデルが上限・未対応・混雑なら、次のモデルで試し直す
+    if (!model && ['limit', 'model', 'busy'].includes(last.kind) && i < models.length - 1) continue;
     return { error: last.message, kind: last.kind };
   }
   return { error: last ? last.message : 'Gemini が応答に失敗しました。', kind: last ? last.kind : 'other' };
