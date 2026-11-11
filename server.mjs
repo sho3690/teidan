@@ -423,6 +423,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   });
   server.listen(PORT, HOST, () => {
     console.log(`鼎談 TEIDAN（サブスク版）を起動しました： http://${HOST}:${PORT}/`);
-    console.log('このウィンドウを閉じると止まります。');
+    if (process.stdout.isTTY) console.log('このウィンドウを閉じると止まります。');
   });
 }
